@@ -29,7 +29,10 @@ struct InspectCommand: ParsableCommand {
 
         if let chatName = openChat {
             // Click on a chat to open it, then inspect the resulting windows
-            let mainWindow = windows[0]
+            guard let mainWindow = windows.first(where: { AXHelpers.identifier($0) == "Main Window" }) else {
+                print("Could not find main window")
+                throw ExitCode.failure
+            }
             if let chatroomsTab = AXHelpers.findFirst(mainWindow, role: "AXCheckBox", identifier: "chatrooms") {
                 _ = AXHelpers.performAction(chatroomsTab, kAXPressAction as String)
                 Thread.sleep(forTimeInterval: 0.3)

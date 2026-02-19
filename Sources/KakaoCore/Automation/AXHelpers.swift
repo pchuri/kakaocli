@@ -107,6 +107,14 @@ public enum AXHelpers {
         AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, true as CFTypeRef) == .success
     }
 
+    /// Close a window via its close button.
+    public static func closeWindow(_ window: AXUIElement) -> Bool {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(window, kAXCloseButtonAttribute as CFString, &value)
+        guard result == .success, let closeButton = value else { return false }
+        return AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString) == .success
+    }
+
     /// Dump the UI tree recursively for inspection.
     public static func dumpTree(_ element: AXUIElement, depth: Int = 0, maxDepth: Int = 6) -> String {
         guard depth <= maxDepth else { return "" }
@@ -178,7 +186,7 @@ public enum AXHelpers {
 
     /// Find the AXRow in a chat list whose name label matches the given text.
     /// KakaoTalk chat list: AXTable > AXRow > AXCell > AXStaticText(id="_NS:18")
-    public static func findChatRow(_ table: AXUIElement, chatName: String) -> AXUIElement? {
+    public static func findChatRow(_ table: AXUIElement, chatName: String, exact: Bool = false) -> AXUIElement? {
         for row in children(table) {
             guard role(row) == "AXRow" else { continue }
             for cell in children(row) {
@@ -186,7 +194,27 @@ public enum AXHelpers {
                 for child in children(cell) {
                     if role(child) == "AXStaticText" && identifier(child) == "_NS:18" {
                         let name = value(child) ?? ""
-                        if name.localizedCaseInsensitiveContains(chatName) {
+                        let matches = exact ? name == chatName : name.localizedCaseInsensitiveContains(chatName)
+                        if matches {
+                            return row
+                        }
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Find the self-chat row (identified by "badge me" image in the cell).
+    public static func findSelfChatRow(_ table: AXUIElement) -> AXUIElement? {
+        for row in children(table) {
+            guard role(row) == "AXRow" else { continue }
+            for cell in children(row) {
+                guard role(cell) == "AXCell" else { continue }
+                for child in children(cell) {
+                    if role(child) == "AXImage" {
+                        let desc = description(child) ?? ""
+                        if desc.contains("badge me") {
                             return row
                         }
                     }
