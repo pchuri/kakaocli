@@ -85,6 +85,24 @@ kakaocli sync --follow --since-log-id 12345
 
 See [AGENTS.md](AGENTS.md) for detailed AI agent integration instructions.
 
+### Login & Lifecycle Management
+
+```bash
+# Store credentials (interactive password prompt)
+kakaocli login
+
+# Non-interactive
+kakaocli login --email user@example.com --password secret
+
+# Check status
+kakaocli login --status
+
+# Remove stored credentials
+kakaocli login --clear
+```
+
+KakaoTalk is automatically launched and logged in when needed. Credentials are stored in macOS Keychain.
+
 ## Architecture
 
 ```
@@ -96,14 +114,17 @@ Sources/
       DatabaseReader.swift      # SQLCipher database access
       Models/                   # Chat, Message, Contact structs
     Automation/
-      AXHelpers.swift           # macOS Accessibility API helpers
+      AXHelpers.swift           # macOS Accessibility API + keyboard helpers
+      AppLifecycle.swift        # App state detection, launch, ensureReady()
+      LoginAutomator.swift      # AX-based login screen automation
+      CredentialStore.swift     # macOS Keychain credential storage
       KakaoAutomator.swift      # KakaoTalk UI automation (send messages)
     Sync/
       DatabaseWatcher.swift     # Polls DB for new messages by logId
       WebhookPublisher.swift    # POSTs message batches to webhook URL
   KakaoCLI/                     # CLI entry point
     KakaoCLI.swift              # Main command registration
-    Commands/                   # Subcommands (auth, chats, messages, etc.)
+    Commands/                   # Subcommands (auth, chats, messages, login, etc.)
   CSQLCipher/                   # System library wrapper for sqlcipher
 Tests/
   KakaoCoreTests/
@@ -144,6 +165,17 @@ Uses macOS Accessibility API (AXUIElement) directly from Swift:
 | NTChatContext | User context (userId for current user) |
 
 ## Changelog
+
+### v0.4.0 - App Lifecycle & Login (Phase 3.5)
+- `login` command: store/check/clear KakaoTalk credentials (macOS Keychain)
+- AppLifecycle: auto-launch KakaoTalk when not running
+- LoginAutomator: auto-login via AX automation when login screen detected
+- CredentialStore: secure credential storage via macOS Keychain
+- `ensureReady()` called before all send operations
+- Login screen detection: window title "Log in" + Logo image check
+- "Keep me logged in" checkbox auto-checked
+- `status` command shows app state and credential status
+- Keyboard helpers (typeText, pressKey) extracted to shared AXHelpers
 
 ### v0.3.0 - Agent Integration (Phase 3)
 - `sync` command with `--follow` for real-time NDJSON message streaming

@@ -6,6 +6,9 @@ import Foundation
 public enum LoginAutomator {
 
     /// Perform credential-based login on the KakaoTalk login screen.
+    ///
+    /// KakaoTalk's login screen uses id="Main Window" with title="Log in".
+    /// It has two AXTextFields (email first, password second) and a "Log in" button.
     public static func login(email: String, password: String) throws {
         let bundleId = AppLifecycle.bundleId
         try AXHelpers.activateApp(bundleId: bundleId)
@@ -16,50 +19,74 @@ public enum LoginAutomator {
             throw LifecycleError.loginFailed("No login window found")
         }
 
-        guard let loginWindow = windows.first(where: { AXHelpers.identifier($0) != "Main Window" }) else {
+        // Login window has id="Main Window" but title="Log in" or contains login logo
+        let loginWindow = windows.first(where: {
+            let title = AXHelpers.title($0) ?? ""
+            return title.lowercased().contains("log in") || title == "로그인"
+        }) ?? windows.first(where: {
+            AXHelpers.findFirst($0, role: "AXImage", identifier: "Logo") != nil
+        })
+
+        guard let loginWindow else {
+            fputs("DEBUG: Window titles: \(windows.map { AXHelpers.title($0) ?? "?" })\n", stderr)
             throw LifecycleError.loginFailed("Could not identify login window")
         }
 
         fputs("Attempting auto-login...\n", stderr)
 
-        // Switch to email login tab if on QR mode
-        if let emailTab = findEmailLoginTab(in: loginWindow) {
-            _ = AXHelpers.performAction(emailTab, kAXPressAction as String)
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-
-        // Find text fields
+        // Find text fields — KakaoTalk uses regular AXTextField for both email and password
         let textFields = AXHelpers.findAll(loginWindow, role: "AXTextField")
         let secureFields = AXHelpers.findAll(loginWindow, role: "AXSecureTextField")
 
-        guard let emailField = textFields.first else {
+        // Email is first text field, password is second text field or first secure field
+        guard textFields.count >= 1 else {
             fputs("DEBUG: Login window tree:\n", stderr)
             fputs(AXHelpers.dumpTree(loginWindow, maxDepth: 5), stderr)
             throw LifecycleError.loginFailed("Could not find email field. The login UI may have changed.")
         }
-        guard let passwordField = secureFields.first else {
+        let emailField = textFields[0]
+
+        // Password: try AXSecureTextField first, then second AXTextField
+        let passwordField: AXUIElement
+        if let secure = secureFields.first {
+            passwordField = secure
+        } else if textFields.count >= 2 {
+            passwordField = textFields[1]
+        } else {
             fputs("DEBUG: Login window tree:\n", stderr)
             fputs(AXHelpers.dumpTree(loginWindow, maxDepth: 5), stderr)
             throw LifecycleError.loginFailed("Could not find password field. The login UI may have changed.")
         }
 
+        // Check "Keep me logged in" checkbox
+        if let keepLoggedIn = AXHelpers.findFirst(loginWindow, role: "AXCheckBox", text: "Keep me logged in") ??
+           AXHelpers.findFirst(loginWindow, role: "AXCheckBox", text: "로그인 유지") {
+            let checked = AXHelpers.intAttribute(keepLoggedIn, kAXValueAttribute as String) ?? 0
+            if checked == 0 {
+                _ = AXHelpers.performAction(keepLoggedIn, kAXPressAction as String)
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+
         // Fill email
-        _ = AXHelpers.focus(emailField)
+        AXHelpers.clickElement(emailField)
         Thread.sleep(forTimeInterval: 0.1)
+        AXHelpers.selectAll()
+        Thread.sleep(forTimeInterval: 0.05)
         if !AXHelpers.setValue(emailField, email) {
-            AXHelpers.clickElement(emailField)
-            Thread.sleep(forTimeInterval: 0.1)
-            AXHelpers.selectAll()
             AXHelpers.typeText(email)
         }
         Thread.sleep(forTimeInterval: 0.2)
 
-        // Fill password (secure fields usually need CGEvent)
+        // Fill password
         AXHelpers.clickElement(passwordField)
         Thread.sleep(forTimeInterval: 0.2)
-        _ = AXHelpers.focus(passwordField)
-        Thread.sleep(forTimeInterval: 0.1)
-        AXHelpers.typeText(password)
+        AXHelpers.selectAll()
+        Thread.sleep(forTimeInterval: 0.05)
+        // Try setValue first, fall back to typing
+        if !AXHelpers.setValue(passwordField, password) {
+            AXHelpers.typeText(password)
+        }
         Thread.sleep(forTimeInterval: 0.3)
 
         // Click login button or press Enter
@@ -69,8 +96,8 @@ public enum LoginAutomator {
             AXHelpers.pressKey(keyCode: 36) // Return
         }
 
-        // Wait for result
-        let result = AppLifecycle.waitForAnyState([.loggedIn, .loginScreen], timeout: 15.0, pollInterval: 1.0)
+        // Wait for result — give it more time for network auth
+        let result = AppLifecycle.waitForAnyState([.loggedIn, .loginScreen], timeout: 30.0, pollInterval: 1.0)
 
         switch result {
         case .loggedIn:

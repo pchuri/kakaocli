@@ -17,7 +17,12 @@ public final class KakaoAutomator {
     /// 4. Type the message and press Enter
     public func sendMessage(to chatName: String, message: String, selfChat: Bool = false) throws {
         // 0. Ensure KakaoTalk is running and logged in
+        let stateBefore = AppLifecycle.detectState()
         try AppLifecycle.ensureReady(credentials: CredentialStore())
+        // If app was just launched, give chat list time to populate
+        if stateBefore != .loggedIn {
+            Thread.sleep(forTimeInterval: 2.0)
+        }
 
         // 1. Activate KakaoTalk
         try AXHelpers.activateApp(bundleId: Self.bundleId)

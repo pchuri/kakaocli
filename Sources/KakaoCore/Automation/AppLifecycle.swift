@@ -44,9 +44,27 @@ public enum AppLifecycle {
             return .launching
         }
 
-        // "Main Window" means logged in
-        if windows.contains(where: { AXHelpers.identifier($0) == "Main Window" }) {
-            return .loggedIn
+        // Check for Main Window — but login screen also uses id="Main Window"
+        // Distinguish by title: login = "Log in" / "로그인", logged in = "KakaoTalk"
+        // Also check for login indicators: Logo image or "Log in" button
+        for window in windows {
+            if AXHelpers.identifier(window) == "Main Window" {
+                let title = AXHelpers.title(window) ?? ""
+                // Login screen: title is "Log in" or has login elements
+                if title.lowercased().contains("log in") || title == "로그인" {
+                    return .loginScreen
+                }
+                // Also check for login button/logo as fallback
+                if AXHelpers.findFirst(window, role: "AXImage", identifier: "Logo") != nil {
+                    return .loginScreen
+                }
+                // Has chat list table = definitely logged in
+                if AXHelpers.chatListTable(window) != nil {
+                    return .loggedIn
+                }
+                // Main Window without login indicators — assume logged in
+                return .loggedIn
+            }
         }
 
         // Check for update dialog
@@ -57,7 +75,7 @@ public enum AppLifecycle {
             }
         }
 
-        // Windows exist but no Main Window — login screen
+        // Windows exist but no Main Window — could be login or other dialog
         return .loginScreen
     }
 
