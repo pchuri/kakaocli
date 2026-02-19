@@ -16,6 +16,9 @@ public final class KakaoAutomator {
     /// 3. Find the message input area in the chat window
     /// 4. Type the message and press Enter
     public func sendMessage(to chatName: String, message: String, selfChat: Bool = false) throws {
+        // 0. Ensure KakaoTalk is running and logged in
+        try AppLifecycle.ensureReady(credentials: CredentialStore())
+
         // 1. Activate KakaoTalk
         try AXHelpers.activateApp(bundleId: Self.bundleId)
         let app = try AXHelpers.appElement(bundleId: Self.bundleId)
@@ -93,14 +96,14 @@ public final class KakaoAutomator {
         //     This is more reliable than CGEvent keystrokes which go to the frontmost window
         if AXHelpers.setValue(inputField, message) {
             Thread.sleep(forTimeInterval: 0.2)
-            pressKey(keyCode: 36) // Return key
+            AXHelpers.pressKey(keyCode: 36) // Return key
         } else {
             // Fallback: type using CGEvent
             _ = AXHelpers.focus(inputField)
             Thread.sleep(forTimeInterval: 0.1)
-            typeText(message)
+            AXHelpers.typeText(message)
             Thread.sleep(forTimeInterval: 0.2)
-            pressKey(keyCode: 36) // Return key
+            AXHelpers.pressKey(keyCode: 36) // Return key
         }
 
         // 12. Close the chat window so it doesn't linger
@@ -127,31 +130,6 @@ public final class KakaoAutomator {
         return nil
     }
 
-    /// Type text using CGEvent (handles Unicode correctly).
-    private func typeText(_ text: String) {
-        for char in text {
-            let utf16 = Array(char.utf16)
-            if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
-                down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-                up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-                down.post(tap: .cghidEventTap)
-                up.post(tap: .cghidEventTap)
-                usleep(5000) // 5ms between keystrokes
-            }
-        }
-    }
-
-    /// Press a key using CGEvent.
-    private func pressKey(keyCode: CGKeyCode, flags: CGEventFlags = []) {
-        if let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
-           let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
-            down.flags = flags
-            up.flags = flags
-            down.post(tap: .cghidEventTap)
-            up.post(tap: .cghidEventTap)
-        }
-    }
 }
 
 public enum AutomationError: Error, CustomStringConvertible {

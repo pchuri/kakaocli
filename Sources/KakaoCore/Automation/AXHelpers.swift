@@ -279,6 +279,40 @@ public enum AXHelpers {
         }
     }
 
+    // MARK: - Keyboard Helpers
+
+    /// Type text using CGEvent (handles Unicode correctly).
+    public static func typeText(_ text: String) {
+        for char in text {
+            let utf16 = Array(char.utf16)
+            if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+                up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                usleep(5000) // 5ms between keystrokes
+            }
+        }
+    }
+
+    /// Press a key using CGEvent.
+    public static func pressKey(keyCode: CGKeyCode, flags: CGEventFlags = []) {
+        if let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
+           let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
+            down.flags = flags
+            up.flags = flags
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Select all text (Cmd+A).
+    public static func selectAll() {
+        pressKey(keyCode: 0, flags: .maskCommand)
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+
     /// Double-click at the center of an element using CGEvent.
     public static func doubleClickElement(_ element: AXUIElement) {
         guard let pos = position(element), let sz = size(element) else { return }

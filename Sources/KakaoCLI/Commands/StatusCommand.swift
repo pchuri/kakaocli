@@ -41,5 +41,13 @@ struct StatusCommand: ParsableCommand {
         print("-----------")
         let hasFullDisk = containerExists && FileManager.default.isReadableFile(atPath: DeviceInfo.containerPath)
         print("Full Disk Access:   \(hasFullDisk ? "Likely OK" : "May be needed")")
+
+        // App lifecycle
+        print("\nApp Lifecycle")
+        print("-------------")
+        let appState = AppLifecycle.detectState()
+        print("App state:          \(appState.rawValue)")
+        let creds = CredentialStore()
+        print("Stored credentials: \(creds.hasCredentials ? "Yes" : "No")")
     }
 }

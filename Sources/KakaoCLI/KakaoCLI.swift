@@ -9,12 +9,13 @@ struct KakaoCLI: ParsableCommand {
         subcommands: [
             AuthCommand.self,
             ChatsCommand.self,
-            MessagesCommand.self,
-            SearchCommand.self,
-            SchemaCommand.self,
-            StatusCommand.self,
             InspectCommand.self,
+            LoginCommand.self,
+            MessagesCommand.self,
+            SchemaCommand.self,
+            SearchCommand.self,
             SendCommand.self,
+            StatusCommand.self,
             SyncCommand.self,
         ]
     )
