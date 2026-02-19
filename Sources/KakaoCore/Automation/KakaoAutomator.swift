@@ -93,7 +93,6 @@ public final class KakaoAutomator {
         //     This is more reliable than CGEvent keystrokes which go to the frontmost window
         if AXHelpers.setValue(inputField, message) {
             Thread.sleep(forTimeInterval: 0.2)
-            // Press Enter to send
             pressKey(keyCode: 36) // Return key
         } else {
             // Fallback: type using CGEvent
@@ -103,6 +102,10 @@ public final class KakaoAutomator {
             Thread.sleep(forTimeInterval: 0.2)
             pressKey(keyCode: 36) // Return key
         }
+
+        // 12. Close the chat window so it doesn't linger
+        Thread.sleep(forTimeInterval: 0.3)
+        _ = AXHelpers.closeWindow(chatWindow)
     }
 
     /// Find the message input AXTextArea in a chat window.
