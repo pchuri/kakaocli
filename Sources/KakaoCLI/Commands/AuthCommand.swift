@@ -54,22 +54,25 @@ struct AuthCommand: ParsableCommand {
             print("Secure key: \(secureKey.prefix(16))...")
         }
 
-        // 4. Check if database file exists
-        let dbPath = "\(DeviceInfo.containerPath)/\(dbName).db"
-        if FileManager.default.fileExists(atPath: dbPath) {
-            print("Database found: \(dbPath)")
-        } else {
-            print("Database NOT found at: \(dbPath)")
-            print("\nListing available .db files:")
+        // 4. Check if database file exists (try without extension first, then with .db)
+        let candidates = [
+            "\(DeviceInfo.containerPath)/\(dbName)",
+            "\(DeviceInfo.containerPath)/\(dbName).db",
+        ]
+        guard let dbPath = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            print("Database NOT found at: \(DeviceInfo.containerPath)/\(dbName)[.db]")
+            print("\nListing files in container:")
             let containerURL = URL(fileURLWithPath: DeviceInfo.containerPath)
             if let files = try? FileManager.default.contentsOfDirectory(at: containerURL, includingPropertiesForKeys: nil) {
-                for file in files where file.pathExtension == "db" {
+                for file in files where !file.lastPathComponent.hasSuffix("-shm") && !file.lastPathComponent.hasSuffix("-wal") {
                     print("  \(file.lastPathComponent)")
                 }
             } else {
                 print("  Could not list directory (check Full Disk Access)")
             }
+            throw ExitCode.failure
         }
+        print("Database found: \(dbPath)")
 
         // 5. Try opening the database
         let reader = DatabaseReader(databasePath: dbPath)

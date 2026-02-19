@@ -55,7 +55,7 @@ struct ChatsCommand: ParsableCommand {
     }
 }
 
-func openDatabase(dbPath: String?, key: String?) throws -> DatabaseReader {
+func openDatabase(dbPath: String?, key: String?, userId userIdOverride: Int? = nil) throws -> DatabaseReader {
     let path: String
     let secureKey: String?
 
@@ -64,10 +64,18 @@ func openDatabase(dbPath: String?, key: String?) throws -> DatabaseReader {
         secureKey = key
     } else {
         let uuid = try DeviceInfo.platformUUID()
-        let userId = try DeviceInfo.userId()
-        let dbName = KeyDerivation.databaseName(userId: userId, uuid: uuid)
-        path = "\(DeviceInfo.containerPath)/\(dbName).db"
-        secureKey = key ?? KeyDerivation.secureKey(userId: userId, uuid: uuid)
+        let uid = try userIdOverride ?? DeviceInfo.userId()
+        let dbName = KeyDerivation.databaseName(userId: uid, uuid: uuid)
+        // Database files may or may not have .db extension
+        let candidates = [
+            "\(DeviceInfo.containerPath)/\(dbName)",
+            "\(DeviceInfo.containerPath)/\(dbName).db",
+        ]
+        guard let found = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            throw KakaoError.databaseNotFound("\(DeviceInfo.containerPath)/\(dbName)")
+        }
+        path = found
+        secureKey = key ?? KeyDerivation.secureKey(userId: uid, uuid: uuid)
     }
 
     let reader = DatabaseReader(databasePath: path)

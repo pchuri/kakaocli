@@ -22,10 +22,12 @@ let package = Package(
         ),
         .target(
             name: "KakaoCore",
-            dependencies: [],
-            linkerSettings: [
-                .linkedLibrary("sqlite3"),
-            ]
+            dependencies: ["CSQLCipher"]
+        ),
+        .systemLibrary(
+            name: "CSQLCipher",
+            pkgConfig: "sqlcipher",
+            providers: [.brew(["sqlcipher"])]
         ),
         .testTarget(
             name: "KakaoCoreTests",

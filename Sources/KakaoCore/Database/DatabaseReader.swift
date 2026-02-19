@@ -1,14 +1,7 @@
+import CSQLCipher
 import Foundation
-#if canImport(SQLite3)
-import SQLite3
-#endif
 
-/// Reads KakaoTalk's encrypted SQLite database.
-///
-/// Note: The system sqlite3 on macOS does NOT include SQLCipher.
-/// For encrypted database access, you need to install sqlcipher via Homebrew
-/// and link against it. This reader provides the interface — if the database
-/// is encrypted and sqlcipher is not available, it will fail with a clear error.
+/// Reads KakaoTalk's encrypted SQLite database using SQLCipher.
 public final class DatabaseReader: @unchecked Sendable {
     private var db: OpaquePointer?
     public let databasePath: String
@@ -39,9 +32,9 @@ public final class DatabaseReader: @unchecked Sendable {
         }
 
         if let key {
-            // SQLCipher compatibility mode 3
-            try exec("PRAGMA cipher_compatibility = 3")
-            try exec("PRAGMA key = '\(key)'")
+            // SQLCipher compatibility mode 3 (matches KakaoTalk's encryption)
+            try exec("PRAGMA cipher_default_compatibility = 3")
+            try exec("PRAGMA KEY='\(key)'")
 
             // Verify the key works by reading a table
             do {
@@ -67,20 +60,27 @@ public final class DatabaseReader: @unchecked Sendable {
     /// List all chat rooms.
     public func chats(limit: Int = 50) throws -> [Chat] {
         let sql = """
-            SELECT id, type, display_name, member_count, last_message_id,
-                   last_message_at, unread_count
-            FROM chat_room
-            ORDER BY last_message_at DESC
+            SELECT r.chatId, r.type, r.chatName, r.activeMembersCount,
+                   r.lastLogId, r.lastUpdatedAt, r.countOfNewMessage,
+                   u.displayName, u.friendNickName, u.nickName
+            FROM NTChatRoom r
+            LEFT JOIN NTUser u ON r.directChatMemberUserId = u.userId AND u.linkId = 0
+            ORDER BY r.lastUpdatedAt DESC
             LIMIT ?
             """
         return try query(sql, bind: [.int(limit)]) { row in
-            Chat(
+            // For direct chats, use the friend's name; for groups, use chatName
+            let chatName = row.string(2)
+            let displayName = row.string(7) ?? row.string(8) ?? row.string(9)
+            let name = chatName ?? displayName ?? "(unknown)"
+
+            return Chat(
                 id: row.int64(0),
-                type: Chat.ChatType(rawValue: row.string(1) ?? "unknown") ?? .unknown,
-                displayName: row.string(2) ?? "(unknown)",
+                type: Chat.ChatType.from(rawInt: row.int(1)),
+                displayName: name,
                 memberCount: row.int(3),
                 lastMessageId: row.optionalInt64(4),
-                lastMessageAt: row.optionalDate(5),
+                lastMessageAt: row.optionalKakaoDate(5),
                 unreadCount: row.int(6)
             )
         }
@@ -92,26 +92,30 @@ public final class DatabaseReader: @unchecked Sendable {
         var bindings: [SQLValue] = []
 
         if let chatId {
-            conditions.append("m.chat_id = ?")
+            conditions.append("m.chatId = ?")
             bindings.append(.int64(chatId))
         }
         if let since {
-            conditions.append("m.created_at >= ?")
-            bindings.append(.double(since.timeIntervalSince1970))
+            // KakaoTalk stores timestamps as seconds since epoch
+            conditions.append("m.sentAt >= ?")
+            bindings.append(.int64(Int64(since.timeIntervalSince1970)))
         }
 
         let where_ = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
 
         let sql = """
-            SELECT m.id, m.chat_id, m.sender_id, m.sender_name, m.message,
-                   m.type, m.created_at, m.is_from_me
-            FROM chat_logs m
+            SELECT m.logId, m.chatId, m.authorId,
+                   COALESCE(u.displayName, u.friendNickName, u.nickName) as senderName,
+                   m.message, m.type, m.sentAt
+            FROM NTChatMessage m
+            LEFT JOIN NTUser u ON m.authorId = u.userId AND u.linkId = 0
             \(where_)
-            ORDER BY m.created_at DESC
+            ORDER BY m.sentAt DESC
             LIMIT ?
             """
         bindings.append(.int(limit))
 
+        let myUserId = try self.myUserId()
         return try query(sql, bind: bindings) { row in
             Message(
                 id: row.int64(0),
@@ -120,8 +124,8 @@ public final class DatabaseReader: @unchecked Sendable {
                 senderName: row.string(3),
                 text: row.string(4),
                 type: Message.MessageType(rawValue: row.int(5)),
-                createdAt: row.date(6),
-                isFromMe: row.bool(7)
+                createdAt: row.kakaoDate(6),
+                isFromMe: row.int64(2) == myUserId
             )
         }
     }
@@ -129,13 +133,16 @@ public final class DatabaseReader: @unchecked Sendable {
     /// Full-text search across messages.
     public func search(query: String, limit: Int = 20) throws -> [Message] {
         let sql = """
-            SELECT m.id, m.chat_id, m.sender_id, m.sender_name, m.message,
-                   m.type, m.created_at, m.is_from_me
-            FROM chat_logs m
+            SELECT m.logId, m.chatId, m.authorId,
+                   COALESCE(u.displayName, u.friendNickName, u.nickName) as senderName,
+                   m.message, m.type, m.sentAt
+            FROM NTChatMessage m
+            LEFT JOIN NTUser u ON m.authorId = u.userId AND u.linkId = 0
             WHERE m.message LIKE ?
-            ORDER BY m.created_at DESC
+            ORDER BY m.sentAt DESC
             LIMIT ?
             """
+        let myUserId = try self.myUserId()
         return try self.query(sql, bind: [.string("%\(query)%"), .int(limit)]) { row in
             Message(
                 id: row.int64(0),
@@ -144,13 +151,21 @@ public final class DatabaseReader: @unchecked Sendable {
                 senderName: row.string(3),
                 text: row.string(4),
                 type: Message.MessageType(rawValue: row.int(5)),
-                createdAt: row.date(6),
-                isFromMe: row.bool(7)
+                createdAt: row.kakaoDate(6),
+                isFromMe: row.int64(2) == myUserId
             )
         }
     }
 
-    /// Discover the actual database schema (useful for reverse engineering).
+    /// Get the logged-in user's ID from NTChatContext.
+    public func myUserId() throws -> Int64 {
+        let results = try query("SELECT userId FROM NTChatContext LIMIT 1", bind: []) { row in
+            row.int64(0)
+        }
+        return results.first ?? 0
+    }
+
+    /// Discover the actual database schema.
     public func schema() throws -> [(name: String, sql: String)] {
         try query(
             "SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name",
@@ -230,13 +245,27 @@ public final class DatabaseReader: @unchecked Sendable {
             sqlite3_column_int(stmt, col) != 0
         }
 
-        func date(_ col: Int32) -> Date {
-            let ts = sqlite3_column_double(stmt, col)
-            return Date(timeIntervalSince1970: ts)
+        /// KakaoTalk stores timestamps as seconds since epoch.
+        func kakaoDate(_ col: Int32) -> Date {
+            let ts = sqlite3_column_int64(stmt, col)
+            return Date(timeIntervalSince1970: Double(ts))
         }
 
-        func optionalDate(_ col: Int32) -> Date? {
-            sqlite3_column_type(stmt, col) == SQLITE_NULL ? nil : date(col)
+        func optionalKakaoDate(_ col: Int32) -> Date? {
+            let val = sqlite3_column_int64(stmt, col)
+            return val == 0 ? nil : Date(timeIntervalSince1970: Double(val))
+        }
+    }
+}
+
+extension Chat.ChatType {
+    /// Map KakaoTalk's integer chat type to our enum.
+    static func from(rawInt: Int) -> Self {
+        // KakaoTalk uses integer types; exact mapping TBD via testing
+        switch rawInt {
+        case 0: return .direct
+        case 1: return .group
+        default: return .unknown
         }
     }
 }
