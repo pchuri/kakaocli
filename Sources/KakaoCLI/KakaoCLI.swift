@@ -13,6 +13,8 @@ struct KakaoCLI: ParsableCommand {
             SearchCommand.self,
             SchemaCommand.self,
             StatusCommand.self,
+            InspectCommand.self,
+            SendCommand.self,
         ]
     )
 }
