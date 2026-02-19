@@ -64,6 +64,27 @@ kakaocli inspect --depth 8
 kakaocli inspect --open-chat "Mom" --depth 5
 ```
 
+### Sync Mode (Phase 3)
+
+```bash
+# Check current high-water mark
+kakaocli sync
+
+# Watch for new messages as NDJSON stream
+kakaocli sync --follow
+
+# Custom poll interval (default: 2s)
+kakaocli sync --follow --interval 1
+
+# POST new messages to a webhook
+kakaocli sync --follow --webhook http://localhost:8080/kakao
+
+# Start from a specific logId instead of latest
+kakaocli sync --follow --since-log-id 12345
+```
+
+See [AGENTS.md](AGENTS.md) for detailed AI agent integration instructions.
+
 ## Architecture
 
 ```
@@ -77,6 +98,9 @@ Sources/
     Automation/
       AXHelpers.swift           # macOS Accessibility API helpers
       KakaoAutomator.swift      # KakaoTalk UI automation (send messages)
+    Sync/
+      DatabaseWatcher.swift     # Polls DB for new messages by logId
+      WebhookPublisher.swift    # POSTs message batches to webhook URL
   KakaoCLI/                     # CLI entry point
     KakaoCLI.swift              # Main command registration
     Commands/                   # Subcommands (auth, chats, messages, etc.)
@@ -120,6 +144,17 @@ Uses macOS Accessibility API (AXUIElement) directly from Swift:
 | NTChatContext | User context (userId for current user) |
 
 ## Changelog
+
+### v0.3.0 - Agent Integration (Phase 3)
+- `sync` command with `--follow` for real-time NDJSON message streaming
+- DatabaseWatcher: polls for new messages by tracking logId high-water mark
+- Webhook support: `--webhook <url>` POSTs new message batches as JSON
+- Configurable poll interval via `--interval`
+- Resume from specific point via `--since-log-id`
+- AGENTS.md: instructions for AI agent integration
+- SKILL.md: OpenClaw skill definition
+- Auto-close chat window after sending
+- Version bump to 0.3.0
 
 ### v0.2.0 - UI Automation (Phase 2)
 - Send messages via macOS Accessibility API

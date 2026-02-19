@@ -165,6 +165,48 @@ public final class DatabaseReader: @unchecked Sendable {
         return results.first ?? 0
     }
 
+    /// Get the maximum logId in the messages table (used by DatabaseWatcher).
+    public func maxLogId() throws -> Int64 {
+        let results = try query("SELECT MAX(logId) FROM NTChatMessage", bind: []) { row in
+            row.optionalInt64(0)
+        }
+        return results.first.flatMap { $0 } ?? 0
+    }
+
+    /// Get messages with logId strictly greater than the given value.
+    /// Returns SyncMessage structs suitable for JSON streaming.
+    public func messagesSince(logId: Int64, myUserId: Int64) throws -> [SyncMessage] {
+        let sql = """
+            SELECT m.logId, m.chatId,
+                   COALESCE(r.chatName, u.displayName, u.friendNickName, u.nickName) as chatName,
+                   m.authorId,
+                   COALESCE(u2.displayName, u2.friendNickName, u2.nickName) as senderName,
+                   m.message, m.type, m.sentAt
+            FROM NTChatMessage m
+            LEFT JOIN NTChatRoom r ON m.chatId = r.chatId
+            LEFT JOIN NTUser u ON r.directChatMemberUserId = u.userId AND u.linkId = 0
+            LEFT JOIN NTUser u2 ON m.authorId = u2.userId AND u2.linkId = 0
+            WHERE m.logId > ?
+            ORDER BY m.logId ASC
+            LIMIT 100
+            """
+        let formatter = ISO8601DateFormatter()
+        return try query(sql, bind: [.int64(logId)]) { row in
+            SyncMessage(
+                type: "message",
+                logId: row.int64(0),
+                chatId: row.int64(1),
+                chatName: row.string(2),
+                senderId: row.int64(3),
+                senderName: row.string(4),
+                text: row.string(5),
+                messageType: row.int(6),
+                timestamp: formatter.string(from: row.kakaoDate(7)),
+                isFromMe: row.int64(3) == myUserId
+            )
+        }
+    }
+
     /// Discover the actual database schema.
     public func schema() throws -> [(name: String, sql: String)] {
         try query(
