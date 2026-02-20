@@ -55,6 +55,8 @@ public enum AXHelpers {
     }
 
     /// Get all windows of an app element.
+    /// Note: KakaoTalk may return AXApplication elements instead of AXWindow elements
+    /// when the window is in certain states. We return whatever is in the list.
     public static func windows(_ appElement: AXUIElement) -> [AXUIElement] {
         var value: AnyObject?
         let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)

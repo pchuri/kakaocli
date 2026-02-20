@@ -96,18 +96,38 @@ public enum LoginAutomator {
             AXHelpers.pressKey(keyCode: 36) // Return
         }
 
-        // Wait for result — give it more time for network auth
-        let result = AppLifecycle.waitForAnyState([.loggedIn, .loginScreen], timeout: 30.0, pollInterval: 1.0)
+        // Wait for login to complete.
+        // After clicking login, the window may disappear briefly during the transition.
+        // Poll with status bar menu detection since the AX window may not be visible.
+        let loginStart = Date()
+        let deadline = Date().addingTimeInterval(30.0)
+        while Date() < deadline {
+            let state = AppLifecycle.detectState(aggressive: false)
+            if state == .loggedIn {
+                fputs("Login successful.\n", stderr)
+                return
+            }
+            if state == .loginScreen && Date().timeIntervalSince(loginStart) > 5.0 {
+                // Still on login screen after 5s — likely an error
+                let windows = AXHelpers.windows(app)
+                let hasLoginWindow = windows.contains {
+                    AXHelpers.role($0) == "AXWindow" && (AXHelpers.title($0) ?? "").lowercased().contains("log in")
+                }
+                if hasLoginWindow {
+                    try checkForLoginErrors(app: app)
+                }
+            }
+            Thread.sleep(forTimeInterval: 1.0)
+        }
 
-        switch result {
-        case .loggedIn:
+        // Final check
+        let finalState = AppLifecycle.detectState(aggressive: false)
+        if finalState == .loggedIn {
             fputs("Login successful.\n", stderr)
             return
-        case .loginScreen:
-            try checkForLoginErrors(app: app)
-        default:
-            throw LifecycleError.loginFailed("Unexpected state after login attempt: \(result.rawValue)")
         }
+
+        throw LifecycleError.loginFailed("Login timed out. Final state: \(finalState.rawValue)")
     }
 
     // MARK: - Private Helpers

@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Manages KakaoTalk login credentials using macOS Keychain.
 public final class CredentialStore: Sendable {
@@ -39,52 +38,63 @@ public final class CredentialStore: Sendable {
     // MARK: - Keychain Primitives
 
     private static func readKeychain(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
+        // Use `security` CLI to avoid code-signing ACL issues with swift run.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "find-generic-password",
+            "-s", service,
+            "-a", account,
+            "-w",  // output password only
         ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            return nil
+        }
     }
 
     private static func writeKeychain(account: String, value: String) throws {
-        let data = Data(value.utf8)
-
-        let searchQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+        // Use `security` CLI to avoid code-signing ACL issues with swift run.
+        // The Security framework ties keychain items to the signing identity of the binary,
+        // which changes every time swift run rebuilds to a new path.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "add-generic-password",
+            "-s", service,
+            "-a", account,
+            "-w", value,
+            "-U",  // update if exists
         ]
-        let updateAttrs: [String: Any] = [
-            kSecValueData as String: data,
-        ]
-
-        var status = SecItemUpdate(searchQuery as CFDictionary, updateAttrs as CFDictionary)
-
-        if status == errSecItemNotFound {
-            var addQuery = searchQuery
-            addQuery[kSecValueData as String] = data
-            status = SecItemAdd(addQuery as CFDictionary, nil)
-        }
-
-        guard status == errSecSuccess else {
-            throw CredentialError.keychainError(status)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw CredentialError.keychainError(OSStatus(process.terminationStatus))
         }
     }
 
     private static func deleteKeychain(account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = [
+            "delete-generic-password",
+            "-s", service,
+            "-a", account,
         ]
-        SecItemDelete(query as CFDictionary)
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
     }
 }
 
@@ -94,8 +104,7 @@ public enum CredentialError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case .keychainError(let status):
-            let msg = SecCopyErrorMessageString(status, nil) as String? ?? "unknown"
-            return "Keychain error: \(status) (\(msg))"
+            return "Keychain error: exit code \(status)"
         }
     }
 }
