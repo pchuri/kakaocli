@@ -19,31 +19,31 @@
 
 ## Overview
 
-kakaocli gives you CLI access to your KakaoTalk conversations on Mac:
+kakaocli lets AI agents (Claude Code, Cursor, custom bots) check and send your KakaoTalk messages — something Kakao's official APIs simply can't do.
 
+- **AI Agent Integration** — JSON output for every command, MCP skill definition, webhook delivery, auto-login
 - **Read** — list chats, view messages, full-text search, raw SQL queries
 - **Send** — send messages to any chat via UI automation
 - **Sync** — real-time NDJSON message stream with webhook support
 - **Harvest** — bulk-capture chat names and load older message history
-- **AI Agent Integration** — JSON output, MCP skill, webhook delivery
 
 ### Why?
 
-Kakao's official APIs cannot read chat history, export conversations, or send free-form messages. kakaocli fills that gap by reading the encrypted local database and automating the native macOS client.
+Kakao's official APIs cannot read chat history, export conversations, or send free-form messages. If you want an AI agent to check your messages, summarize conversations, or reply on your behalf — there's no official way to do it. kakaocli fills that gap by reading the local database and automating the native macOS client.
 
 ## 개요
 
-kakaocli는 Mac에서 카카오톡 대화에 CLI로 접근할 수 있게 해줍니다:
+kakaocli는 AI 에이전트(Claude Code, Cursor, 커스텀 봇)가 카카오톡 메시지를 확인하고 보낼 수 있게 해줍니다 — 카카오 공식 API로는 불가능한 기능입니다.
 
+- **AI 에이전트 연동** — 모든 명령의 JSON 출력, MCP 스킬 정의, 웹훅 전달, 자동 로그인
 - **읽기** — 채팅 목록, 메시지 조회, 전체 텍스트 검색, SQL 쿼리
 - **전송** — UI 자동화를 통한 메시지 전송
 - **동기화** — 실시간 NDJSON 메시지 스트림 및 웹훅 지원
 - **수집** — 채팅방 이름 일괄 수집 및 이전 메시지 로드
-- **AI 에이전트 연동** — JSON 출력, MCP 스킬, 웹훅 전달
 
 ### 왜 필요한가요?
 
-카카오 공식 API로는 채팅 기록을 읽거나, 대화를 내보내거나, 자유로운 메시지를 보낼 수 없습니다. kakaocli는 암호화된 로컬 데이터베이스를 읽고 네이티브 macOS 클라이언트를 자동화하여 이 부분을 해결합니다.
+카카오 공식 API로는 채팅 기록을 읽거나, 대화를 내보내거나, 자유로운 메시지를 보낼 수 없습니다. AI 에이전트가 메시지를 확인하거나, 대화를 요약하거나, 대신 답장하게 하고 싶어도 공식적인 방법이 없습니다. kakaocli는 로컬 데이터베이스를 읽고 네이티브 macOS 클라이언트를 자동화하여 이 부분을 해결합니다.
 
 ## Getting Started / 시작하기
 
@@ -256,49 +256,29 @@ See [AGENTS.md](AGENTS.md) for detailed integration instructions including crede
 
 ## How It Works / 동작 원리
 
-**Database access:** KakaoTalk Mac stores conversations in an SQLCipher-encrypted database. The encryption key is derived using PBKDF2-HMAC-SHA256 (100k iterations) from the device UUID and user's KakaoTalk ID. The database is opened in **read-only mode** (`SQLITE_OPEN_READONLY`) — kakaocli never modifies the KakaoTalk database.
+kakaocli reads KakaoTalk's local SQLCipher-encrypted database in **read-only mode** — it never modifies the database. For sending messages and UI interactions, it uses macOS Accessibility APIs (AXUIElement) to automate the native KakaoTalk client.
 
-**데이터베이스 접근:** 카카오톡 Mac은 SQLCipher로 암호화된 데이터베이스에 대화를 저장합니다. kakaocli는 **읽기 전용 모드**(`SQLITE_OPEN_READONLY`)로 열어 데이터베이스를 절대 수정하지 않습니다.
+kakaocli는 카카오톡의 로컬 SQLCipher 암호화 데이터베이스를 **읽기 전용 모드**로 읽습니다 — 데이터베이스를 절대 수정하지 않습니다. 메시지 전송 및 UI 상호작용에는 macOS 접근성 API(AXUIElement)를 사용하여 네이티브 카카오톡 클라이언트를 자동화합니다.
 
-**UI automation:** Uses the macOS Accessibility API (AXUIElement) to navigate the KakaoTalk window, open chats, type messages, and press Enter. The Vision framework is used for OCR-based button detection during harvest.
+## Known Limitations / 알려진 제한 사항
 
-**UI 자동화:** macOS 접근성 API(AXUIElement)를 사용하여 카카오톡 창을 탐색하고, 채팅을 열고, 메시지를 입력합니다.
+> [!WARNING]
+> **macOS only.** This tool works exclusively with KakaoTalk for Mac. It does not support Windows, mobile, or web versions.
 
-### Architecture
+- **Incomplete message history.** KakaoTalk Mac only syncs messages from the server when you open a chat. If you haven't opened a chat on your Mac in a while (or ever), older messages won't be in the local database. Use `kakaocli harvest --scroll` to trigger loading older history, but this is limited by KakaoTalk's own sync behavior and the Talk Drive Plus paywall.
+- **Group chat names may show as `(unknown)`.** The database doesn't always store display names for group chats. Run `kakaocli harvest` to capture names from the UI.
+- **Sending requires KakaoTalk to be running.** Read commands work without the app open, but `send`, `sync`, and `harvest` need the KakaoTalk window. kakaocli launches and logs in automatically if credentials are stored.
+- **One Mac at a time.** KakaoTalk only allows one Mac logged in per account.
+- **Media and non-text messages.** Currently only text messages are fully supported. Photos, videos, stickers, and other media types are visible in the database but not rendered.
 
-```
-Sources/
-  KakaoCore/                    # Core library
-    Database/
-      KeyDerivation.swift       # PBKDF2-SHA256 key derivation
-      DeviceInfo.swift          # Device UUID, container path, user ID
-      DatabaseReader.swift      # SQLCipher database access (read-only)
-      Models/                   # Chat, Message, Contact structs
-    Automation/
-      AXHelpers.swift           # macOS Accessibility API helpers
-      AppLifecycle.swift        # App state detection, launch, login
-      ChatHarvester.swift       # Bulk chat history loading via UI
-      KakaoAutomator.swift      # UI automation (send messages)
-    Sync/
-      DatabaseWatcher.swift     # Polls DB for new messages
-      WebhookPublisher.swift    # POSTs messages to webhook URL
-  KakaoCLI/                     # CLI entry point (swift-argument-parser)
-    Commands/                   # Subcommands
-  CSQLCipher/                   # System library wrapper for sqlcipher
-Tests/
-  KakaoCoreTests/
-    KeyDerivationTests.swift    # Key derivation tests
-```
+> [!WARNING]
+> **macOS 전용.** 이 도구는 카카오톡 Mac 버전에서만 작동합니다.
 
-### KakaoTalk Database Schema
-
-| Table | Purpose |
-|-------|---------|
-| NTChatRoom | Chat rooms — chatId, type (0=direct, 1-3=group, 4=open, 5=self), activeMembersCount, lastUpdatedAt |
-| NTChatMessage | Messages — chatId, logId, authorId, message, sentAt, type (1=text) |
-| NTUser | Users — userId, displayName, friendNickName, nickName |
-| NTOpenLink | Open channel links — linkId, linkName |
-| NTChatContext | User context — userId for current user |
+- **불완전한 메시지 기록.** 카카오톡 Mac은 채팅을 열어야 서버에서 메시지를 동기화합니다. Mac에서 오래 열지 않은 채팅은 이전 메시지가 로컬 데이터베이스에 없을 수 있습니다. `kakaocli harvest --scroll`로 이전 메시지 로드를 시도할 수 있지만, 카카오톡 자체 동기화 및 톡드라이브 플러스 페이월에 의해 제한됩니다.
+- **그룹 채팅 이름이 `(unknown)`으로 표시될 수 있습니다.** `kakaocli harvest`를 실행하여 UI에서 이름을 수집하세요.
+- **전송 시 카카오톡 실행 필요.** 읽기 명령은 앱 없이 작동하지만, `send`, `sync`, `harvest`는 카카오톡 창이 필요합니다.
+- **계정당 Mac 1대.** 카카오톡은 계정당 하나의 Mac만 로그인을 허용합니다.
+- **미디어 및 비텍스트 메시지.** 현재 텍스트 메시지만 완전히 지원됩니다.
 
 ## Disclaimer
 
