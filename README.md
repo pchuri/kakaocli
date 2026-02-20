@@ -44,6 +44,9 @@ kakaocli search "dinner" --json
 
 # Dump raw database schema (for reverse engineering)
 kakaocli schema
+
+# Run raw SQL query against the decrypted database
+kakaocli query "SELECT chatId, type, activeMembersCount FROM NTChatRoom LIMIT 5"
 ```
 
 ### UI Automation (Phase 2)
@@ -84,6 +87,40 @@ kakaocli sync --follow --since-log-id 12345
 ```
 
 See [AGENTS.md](AGENTS.md) for detailed AI agent integration instructions.
+
+### Harvest Mode (Phase 4)
+
+```bash
+# Capture display names from UI for all chats (fast, no scrolling)
+kakaocli harvest
+
+# Full harvest: open each chat, scroll to top, click "View Previous Chats"
+kakaocli harvest --scroll
+
+# Process only top N most recent chats
+kakaocli harvest --scroll --top 20
+
+# Control max "View Previous Chats" clicks per chat
+kakaocli harvest --scroll --max-clicks 5
+
+# Preview without making changes
+kakaocli harvest --dry-run
+```
+
+**What it does:**
+
+1. Iterates through the chat list (ordered by last activity)
+2. Captures **display names** from the UI (many are `(unknown)` in the DB for group chats)
+3. With `--scroll`: opens each chat, scrolls to top, and clicks "View Previous Chats" to load older message history from the server
+4. Detects and dismisses **Talk Drive Plus paywall** popups automatically
+5. Saves metadata (chatId → displayName, member count, message count) to `~/.kakaocli/metadata.json`
+6. Skips chats with unread messages (to avoid marking them as read)
+
+**Technical approach:**
+- Uses **Vision framework OCR** to locate "View Previous Chats" text in screenshots (position varies per chat)
+- Takes screenshots via `peekaboo image --window-id` for reliable window capture
+- Clicks via **CGEvent** (direct mouse events, more reliable than external tools)
+- Detects paywall popups via **CGWindow API** (the popup is a sheet that doesn't appear in the AX window list)
 
 ### Login & Lifecycle Management
 
@@ -153,12 +190,13 @@ Sources/
       LoginAutomator.swift      # AX-based login screen automation
       CredentialStore.swift     # macOS Keychain credential storage
       KakaoAutomator.swift      # KakaoTalk UI automation (send messages)
+      ChatHarvester.swift       # UI automation for bulk chat history loading
     Sync/
       DatabaseWatcher.swift     # Polls DB for new messages by logId
       WebhookPublisher.swift    # POSTs message batches to webhook URL
   KakaoCLI/                     # CLI entry point
     KakaoCLI.swift              # Main command registration
-    Commands/                   # Subcommands (auth, chats, messages, login, etc.)
+    Commands/                   # Subcommands (auth, chats, messages, login, harvest, etc.)
   CSQLCipher/                   # System library wrapper for sqlcipher
 Tests/
   KakaoCoreTests/
@@ -193,12 +231,24 @@ Uses macOS Accessibility API (AXUIElement) directly from Swift:
 
 | Table | Purpose |
 |-------|---------|
-| NTChatRoom | Chat rooms (chatId, chatName, activeMembersCount, lastUpdatedAt) |
-| NTChatMessage | Messages (chatId, logId, authorId, message, sentAt, type) |
-| NTUser | Users (userId, displayName, friendNickName, nickName) |
-| NTChatContext | User context (userId for current user) |
+| NTChatRoom | Chat rooms — chatId, type (0=direct, 1-3=group, 4=open, 5=self), chatName (usually empty), activeMembersCount, lastUpdatedAt, displayMemberIds (binary plist of userId array), directChatMemberUserId, linkId |
+| NTChatMessage | Messages — chatId, logId, authorId, message, sentAt, type (1=text) |
+| NTUser | Users — userId, displayName, friendNickName, nickName, linkId (0=friend, >0=open channel member) |
+| NTOpenLink | Open channel links — linkId, linkName |
+| NTChatContext | User context — userId for current user |
 
 ## Changelog
+
+### v0.5.0 - Chat Harvest (Phase 4)
+- `harvest` command: bulk-capture chat display names and load message history
+- Vision framework OCR to locate "View Previous Chats" button (position varies per chat)
+- CGEvent-based clicking for reliable UI interaction
+- CGWindow API for paywall popup detection (AX doesn't see sheet-style popups)
+- Auto-dismiss Talk Drive Plus paywall dialogs
+- MetadataStore: persistent chatId → displayName mapping at `~/.kakaocli/metadata.json`
+- Scroll-to-top via `cliclick` mouse positioning + `peekaboo scroll --no-auto-focus`
+- Screenshots via `peekaboo image --window-id` (avoids hidden sub-window capture)
+- Skips chats with unread messages by default
 
 ### v0.4.1 - Robust Auto-Login
 - Fix credential storage: switch from Security framework to `security` CLI (avoids code-signing ACL issues with `swift run`)

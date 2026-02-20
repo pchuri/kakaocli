@@ -47,6 +47,30 @@ No external dependencies besides `sqlcipher` (Homebrew). The `CSQLCipher` system
 - After login button click, the window disappears during transition — poll with non-aggressive mode
 - "Keep me logged in" checkbox is auto-checked — subsequent launches skip login
 
+### Harvest / Chat History Loading
+- **Vision OCR**: Uses `VNRecognizeTextRequest` to find "View Previous Chats" in screenshots. Bounding box origin is bottom-left (flip Y axis).
+- **Screenshots**: Use `peekaboo image --window-id <ID>` — `--app` alone captures hidden sub-windows (69x19 tiny images)
+- **Window ID**: Get via `peekaboo window list --app "KakaoTalk" -j`, match by `window_title`
+- **Clicking**: Use **CGEvent** directly, NOT `peekaboo click --app` (which activates the app and can reset scroll position)
+- **Scrolling**: `cliclick m:X,Y` (move cursor, no click) then `peekaboo scroll --direction up --amount 100 --no-auto-focus`
+- **Activation order**: `activateAndRaise()` BEFORE scrolling — never activate right before clicking
+- **Paywall popup**: Invisible to AX (`kAXWindowsAttribute`), visible to CGWindow API (`peekaboo window list`). Dismiss with Escape.
+- **MetadataStore**: `~/.kakaocli/metadata.json` maps chatId → displayName, memberCount, chatType, messageCount
+- **Harvest name mapping is position-based** (UI row[i] → DB row[i]) — unreliable because UI order shifts when messages arrive. Use DB-based name resolution instead.
+
+### Database Name Resolution
+- **Direct chats**: `NTUser.friendNickName` or `displayName` via `directChatMemberUserId` JOIN (filter `linkId = 0`)
+- **Group chats**: Parse `NTChatRoom.displayMemberIds` — a binary plist (`bplist00`) containing `NSArray<NSNumber>` of userIds. Resolve each from NTUser.
+- **Open channels/groups**: `NTOpenLink.linkName` via `linkId` JOIN
+- **Self-chat** (type 5): Only 1 member, label as "Self-chat (Notes)"
+- **`NTChatRoom.chatName`**: Usually empty — only set for custom-named group chats
+- **`kakaocli chats --limit N`**: Default limit is 50. Use `--limit 999999` to get all chats.
+- **Local DB message cache**: Only ~1-4 messages per chat are cached locally. Full history lives on KakaoTalk's servers.
+
+### Query Command
+- `kakaocli query "SELECT ..."` — runs raw read-only SQL against the decrypted DB, returns JSON array of arrays.
+- Useful for ad-hoc data extraction (e.g., member lists, message stats, schema exploration).
+
 ## Safety Rules
 
 - **NEVER send test messages to other people's chats.** Use `--me` flag for self-chat only.

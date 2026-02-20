@@ -189,6 +189,41 @@ kakaocli sync --follow | while read -r line; do
 done
 ```
 
+## Harvest (Bulk Chat History)
+
+The `harvest` command automates bulk extraction of chat display names and message history loading.
+
+### Names Only (Fast)
+```bash
+kakaocli harvest
+```
+Captures display names for all chats from the UI (many group chats show `(unknown)` in the DB). Saves to `~/.kakaocli/metadata.json`.
+
+### Full History Loading
+```bash
+kakaocli harvest --scroll --max-clicks 5
+```
+Opens each chat, scrolls to top, and clicks "View Previous Chats" to load older messages from the server. Automatically handles Talk Drive Plus paywall popups.
+
+### Options
+- `--top <N>` — Process only top N most recent chats
+- `--scroll` — Enable full scroll + click mode (without this, only captures names)
+- `--max-clicks <N>` — Max "View Previous Chats" clicks per chat (default: 10)
+- `--scroll-delay <seconds>` — Delay between actions (default: 1.5s)
+- `--dry-run` — Preview without making changes
+
+### Output
+Returns JSON array with per-chat results:
+```json
+[{"chatId": 123, "name": "Chat Name", "messagesBefore": 48, "messagesAfter": 148, "newMessages": 100, "skipped": false}]
+```
+
+### Notes
+- Chats with unread messages are automatically skipped (to avoid marking them as read)
+- The Talk Drive Plus paywall blocks loading older messages — the tool detects and dismisses it
+- Uses Vision OCR + CGEvent clicks for reliable UI interaction
+- Metadata saved to `~/.kakaocli/metadata.json`
+
 ## Troubleshooting
 
 | Problem | Solution |

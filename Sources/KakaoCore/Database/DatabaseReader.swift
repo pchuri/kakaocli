@@ -207,6 +207,38 @@ public final class DatabaseReader: @unchecked Sendable {
         }
     }
 
+    /// Run an arbitrary read-only SQL query and return results as arrays of Any.
+    public func rawQuery(_ sql: String) throws -> [[Any]] {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            throw KakaoError.sqlError("prepare: \(msg)")
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        let colCount = sqlite3_column_count(stmt)
+        var results: [[Any]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            var row: [Any] = []
+            for i in 0..<colCount {
+                switch sqlite3_column_type(stmt, i) {
+                case SQLITE_INTEGER:
+                    row.append(sqlite3_column_int64(stmt, i))
+                case SQLITE_FLOAT:
+                    row.append(sqlite3_column_double(stmt, i))
+                case SQLITE_TEXT:
+                    row.append(String(cString: sqlite3_column_text(stmt, i)))
+                case SQLITE_NULL:
+                    row.append("")
+                default:
+                    row.append("")
+                }
+            }
+            results.append(row)
+        }
+        return results
+    }
+
     /// Discover the actual database schema.
     public func schema() throws -> [(name: String, sql: String)] {
         try query(

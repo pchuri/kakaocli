@@ -53,9 +53,12 @@ public enum AppLifecycle {
         // Check for real AXWindow elements first
         let realWindows = windows.filter { AXHelpers.role($0) == "AXWindow" }
         if !realWindows.isEmpty {
-            for window in realWindows {
-                return classifyWindow(window)
+            // Prioritize Main Window for classification
+            if let mainWindow = realWindows.first(where: { AXHelpers.identifier($0) == "Main Window" }) {
+                return classifyWindow(mainWindow)
             }
+            // Non-Main-Window windows are chat windows → we're logged in
+            return .loggedIn
         }
 
         // No real windows — check status bar menu (works even when window is hidden)

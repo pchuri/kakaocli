@@ -281,6 +281,28 @@ public enum AXHelpers {
         }
     }
 
+    // MARK: - Mouse Movement & Scroll
+
+    /// Move the mouse cursor to a screen position.
+    public static func moveMouse(to point: CGPoint) {
+        if let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                               mouseCursorPosition: point, mouseButton: .left) {
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Send a scroll wheel event. Negative deltaY = scroll up, positive = scroll down.
+    public static func scroll(deltaY: Int32, at point: CGPoint? = nil) {
+        if let point {
+            moveMouse(to: point)
+            usleep(50000) // 50ms settle
+        }
+        if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                               wheelCount: 1, wheel1: deltaY, wheel2: 0, wheel3: 0) {
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
     // MARK: - Keyboard Helpers
 
     /// Type text using CGEvent (handles Unicode correctly).

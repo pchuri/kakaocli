@@ -1,7 +1,7 @@
 ---
 name: kakaocli
 description: Send and receive KakaoTalk messages via CLI
-version: 0.4.1
+version: 0.5.0
 requires:
   binaries:
     - kakaocli
@@ -58,6 +58,15 @@ kakaocli sync --follow
 ### Search Messages
 ```bash
 kakaocli search "keyword" --json
+```
+
+### Harvest Chat Names & History
+```bash
+# Capture display names for all chats
+kakaocli harvest
+
+# Full harvest with scroll + history loading
+kakaocli harvest --scroll --top 20
 ```
 
 ## Usage Guidelines
