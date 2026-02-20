@@ -1,7 +1,7 @@
 ---
 name: kakaocli
 description: Send and receive KakaoTalk messages via CLI
-version: 0.3.0
+version: 0.4.1
 requires:
   binaries:
     - kakaocli
@@ -14,9 +14,21 @@ tags:
 
 # KakaoTalk CLI Skill
 
-Read and send KakaoTalk messages from the command line. Requires macOS with KakaoTalk desktop app installed and logged in.
+Read and send KakaoTalk messages from the command line. Requires macOS with KakaoTalk desktop app installed. Auto-launches and auto-logs in when credentials are stored.
+
+## Setup (Required First Time)
+
+```bash
+# Store credentials for auto-login
+kakaocli login --email user@example.com --password yourpassword
+```
 
 ## Available Commands
+
+### Check Status
+```bash
+kakaocli login --status
+```
 
 ### List Chats
 ```bash
@@ -54,4 +66,5 @@ kakaocli search "keyword" --json
 - Use `--me` flag and `--dry-run` for testing
 - Rate limit: max 1 message per 2 seconds
 - Don't send messages between 11 PM and 7 AM unless urgent
-- KakaoTalk desktop app must be running for send/sync operations
+- KakaoTalk is auto-launched and auto-logged-in when credentials are stored
+- First-time setup requires `kakaocli login --email ... --password ...`

@@ -91,17 +91,51 @@ See [AGENTS.md](AGENTS.md) for detailed AI agent integration instructions.
 # Store credentials (interactive password prompt)
 kakaocli login
 
-# Non-interactive
+# Non-interactive (required for AI agent / automation contexts)
 kakaocli login --email user@example.com --password secret
 
-# Check status
+# Check current status (app state, stored credentials)
 kakaocli login --status
 
-# Remove stored credentials
+# Remove stored credentials from Keychain
 kakaocli login --clear
 ```
 
-KakaoTalk is automatically launched and logged in when needed. Credentials are stored in macOS Keychain.
+**Automatic lifecycle management:** When you run `send`, `sync`, or any command that needs KakaoTalk, the tool automatically:
+
+1. **Launches KakaoTalk** if not running
+2. **Detects login screen** via AX window title and status bar menu
+3. **Auto-fills credentials** and clicks "Log in" if credentials are stored
+4. **Checks "Keep me logged in"** so future launches skip the login screen
+5. **Waits for login to complete** before proceeding
+
+If KakaoTalk is already running and logged in, this all happens instantly.
+
+#### Credential Storage
+
+Credentials are stored in the **macOS login Keychain** using the `security` CLI tool:
+
+- **Service:** `com.kakaocli.credentials`
+- **Items:** `kakaotalk-email` and `kakaotalk-password`
+- **Access:** Any process running as the current macOS user can read them (no per-app ACL, since `swift run` changes binary paths on rebuild)
+- **Encryption:** Protected by the macOS Keychain encryption (AES-256-GCM, locked when user logs out)
+
+To inspect stored credentials manually:
+```bash
+security find-generic-password -s "com.kakaocli.credentials" -a "kakaotalk-email" -w
+```
+
+#### App State Detection
+
+The tool detects KakaoTalk's state via multiple methods:
+
+| Method | When Used | How |
+|--------|-----------|-----|
+| AX Window inspection | Window is visible | Check window title, presence of login elements vs chat list |
+| Status bar menu | Window is hidden | Read menu items: "Log out" = logged in, "Log in" = not |
+| Process check | Always | `NSRunningApplication` by bundle ID |
+
+KakaoTalk's AX hierarchy is non-standard — `kAXWindowsAttribute` may return `AXApplication` elements instead of `AXWindow`. The status bar menu is the most reliable state indicator.
 
 ## Architecture
 
@@ -165,6 +199,13 @@ Uses macOS Accessibility API (AXUIElement) directly from Swift:
 | NTChatContext | User context (userId for current user) |
 
 ## Changelog
+
+### v0.4.1 - Robust Auto-Login
+- Fix credential storage: switch from Security framework to `security` CLI (avoids code-signing ACL issues with `swift run`)
+- Fix state detection: use status bar menu when AX window is not visible
+- Fix login transition: non-aggressive polling avoids interfering with login flow
+- Add AppleScript-based window recovery for hidden-window state
+- Detect login state reliably even when window is hidden (menu bar "Log out" check)
 
 ### v0.4.0 - App Lifecycle & Login (Phase 3.5)
 - `login` command: store/check/clear KakaoTalk credentials (macOS Keychain)

@@ -4,14 +4,84 @@ Instructions for AI agents that want to read and send KakaoTalk messages.
 
 ## Prerequisites
 
-- macOS 14+ with KakaoTalk desktop app installed and logged in
+- macOS 14+ with KakaoTalk desktop app installed
 - `kakaocli` binary built and in PATH (or run via `swift run kakaocli`)
-- System Settings > Privacy & Security: Full Disk Access + Accessibility granted
+- System Settings > Privacy & Security: **Full Disk Access** + **Accessibility** granted to your terminal
+- KakaoTalk credentials stored (see First-Time Setup below)
+
+## First-Time Setup
+
+Before using kakaocli, store credentials so the tool can auto-login:
+
+```bash
+# Store KakaoTalk credentials (saved in macOS Keychain)
+kakaocli login --email user@example.com --password yourpassword
+
+# Verify everything is working
+kakaocli login --status
+# Expected output includes: "Stored credentials: Yes"
+```
+
+**Important for AI agents:** The `--password` flag is required in non-interactive contexts (scripts, automation, Claude Code). The interactive `kakaocli login` prompt uses `getpass()` which doesn't work outside a real terminal.
+
+### Credential Storage
+
+- Stored in macOS login Keychain under service `com.kakaocli.credentials`
+- Two items: `kakaotalk-email` and `kakaotalk-password`
+- Persists across reboots, encrypted by macOS (AES-256-GCM)
+- Accessible by any process running as the current macOS user
+- Uses `security` CLI tool (not Security.framework) to avoid code-signing ACL issues
+
+To inspect or manage credentials manually:
+```bash
+# Read stored email
+security find-generic-password -s "com.kakaocli.credentials" -a "kakaotalk-email" -w
+
+# Delete stored credentials
+security delete-generic-password -s "com.kakaocli.credentials" -a "kakaotalk-email"
+security delete-generic-password -s "com.kakaocli.credentials" -a "kakaotalk-password"
+```
+
+## Automatic Lifecycle Management
+
+You do **NOT** need to manually launch or log into KakaoTalk. The tool handles it automatically:
+
+| Situation | What happens |
+|-----------|-------------|
+| App not running | Launches KakaoTalk via `NSWorkspace` |
+| Login screen showing | Auto-fills credentials and clicks "Log in" |
+| "Keep me logged in" | Checked automatically — future launches skip login |
+| Window hidden (menu bar only) | Detects state via status bar menu items |
+| Already logged in | Proceeds immediately |
+
+The first auto-login after a fresh install takes 5-10 seconds. With "Keep me logged in" checked, subsequent launches are near-instant.
+
+### App State Detection
+
+```bash
+kakaocli login --status
+```
+
+| State | Meaning |
+|-------|---------|
+| `loggedIn` | Ready to use |
+| `loginScreen` | Needs login (will auto-login if credentials stored) |
+| `notRunning` | KakaoTalk not running (will auto-launch on next command) |
+| `launching` | App starting up |
+| `unknown` | Transient state during transitions |
+
+### Known AX Quirks
+
+KakaoTalk's macOS Accessibility (AX) hierarchy is non-standard:
+- `kAXWindowsAttribute` may return `AXApplication` elements instead of `AXWindow`
+- When the window is hidden (app running in menu bar), there are zero real AXWindow elements
+- The **status bar menu** is the most reliable state indicator ("Log out" present = logged in)
+- After login, the window briefly disappears during the transition — don't poll aggressively
 
 ## Quick Start
 
 ```bash
-# Verify access
+# Verify database access
 kakaocli auth
 
 # List recent chats
@@ -20,10 +90,10 @@ kakaocli chats --json
 # Read messages from a specific chat
 kakaocli messages --chat "Mom" --since 1h --json
 
-# Send a message
+# Send a message (auto-launches and logs in if needed)
 kakaocli send "Mom" "I'll be home soon"
 
-# Send to self-chat (for testing)
+# Send to self-chat (for testing — ALWAYS use this for tests)
 kakaocli send x --me "Test message"
 
 # Watch for new messages (NDJSON stream)
@@ -59,10 +129,11 @@ kakaocli send "Mom" "Hello" --dry-run       # Preview without sending
 ```
 
 **Important constraints:**
-- Requires KakaoTalk desktop app to be running and visible
-- UI automation needs Accessibility permission
+- KakaoTalk is auto-launched if needed (no need to start it manually)
+- UI automation needs Accessibility permission granted to your terminal
 - Rate limit: wait at least 2 seconds between sends
 - The chat window opens, types, sends, then closes automatically
+- The `--me` flag sends to self-chat regardless of the chat name argument (use `_` as placeholder)
 
 ## Sync Mode (Real-Time Monitoring)
 
@@ -117,6 +188,17 @@ kakaocli sync --follow | while read -r line; do
   echo "$line" | jq -r '.text' | process_message
 done
 ```
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `Keychain error` | Run `kakaocli login --clear` then re-store credentials |
+| `No login window found` | KakaoTalk window may be hidden — run `kakaocli login --status` to check |
+| `Login did not succeed` | Verify credentials: `kakaocli login --email ... --password ...` |
+| `Chat not found` | Use exact substring match — run `kakaocli chats` to see available names |
+| `No open windows` | KakaoTalk may need manual interaction first time — open it once manually |
+| Login works but send fails | Window may need time to load — retry after 2-3 seconds |
 
 ## Safety Rules
 
