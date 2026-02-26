@@ -9,31 +9,19 @@ public final class KakaoAutomator {
     public init() {}
 
     /// Send a message to a chat by navigating the UI.
-    ///
-    /// Steps:
-    /// 1. Activate KakaoTalk
-    /// 2. Find the chat in the list and double-click to open
-    /// 3. Find the message input area in the chat window
-    /// 4. Type the message and press Enter
     public func sendMessage(to chatName: String, message: String, selfChat: Bool = false) throws {
-        // 0. Ensure KakaoTalk is running and logged in
+        // 1. Ensure KakaoTalk is running and logged in
         let stateBefore = AppLifecycle.detectState()
         try AppLifecycle.ensureReady(credentials: CredentialStore())
-        // If app was just launched, give chat list time to populate
         if stateBefore != .loggedIn {
             Thread.sleep(forTimeInterval: 2.0)
         }
 
-        // 1. Activate KakaoTalk
+        // 2. Activate KakaoTalk and get windows
         try AXHelpers.activateApp(bundleId: Self.bundleId)
         let app = try AXHelpers.appElement(bundleId: Self.bundleId)
 
         let windows = AXHelpers.windows(app)
-        guard !windows.isEmpty else {
-            throw AutomationError.noWindows
-        }
-
-        // 2. Find the main window (id="Main Window")
         guard let mainWindow = windows.first(where: { AXHelpers.identifier($0) == "Main Window" }) else {
             throw AutomationError.noWindows
         }
@@ -52,7 +40,7 @@ public final class KakaoAutomator {
             Thread.sleep(forTimeInterval: 0.3)
         }
 
-        // 4. Find the chat row in the list
+        // 5. Find the chat row in the list
         guard let table = AXHelpers.chatListTable(mainWindow) else {
             throw AutomationError.chatNotFound(chatName)
         }
@@ -70,40 +58,52 @@ public final class KakaoAutomator {
             row = chatRow
         }
 
-        // 6. Double-click the row to open the chat window
-        AXHelpers.doubleClickElement(row)
-        Thread.sleep(forTimeInterval: 1.0)
+        // 6. Open the chat via AX row selection + Enter (works even when off-screen).
+        //    Falls back to scroll-into-view + double-click if selection fails.
+        var opened = false
+        if AXHelpers.selectRow(row, in: table) {
+            Thread.sleep(forTimeInterval: 0.2)
+            AXHelpers.pressKey(keyCode: 36) // Enter to open
+            Thread.sleep(forTimeInterval: 0.5)
+            let checkWindows = AXHelpers.windows(app)
+            opened = checkWindows.contains { AXHelpers.identifier($0) != "Main Window" }
+        }
+        if !opened {
+            if let scrollArea = AXHelpers.chatListScrollArea(mainWindow) {
+                _ = AXHelpers.scrollRowToVisible(row, in: scrollArea)
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+            AXHelpers.doubleClickElement(row)
+        }
 
-        // 7. Find the newly opened chat window (only non-main window after closing others)
-        let updatedWindows = AXHelpers.windows(app)
-        let chatWindow = updatedWindows.first(where: { AXHelpers.identifier($0) != "Main Window" })
-
+        // 7. Wait for the chat window to appear
+        var chatWindow: AXUIElement?
+        let windowDeadline = Date().addingTimeInterval(5.0)
+        while Date() < windowDeadline {
+            Thread.sleep(forTimeInterval: 0.5)
+            let updatedWindows = AXHelpers.windows(app)
+            chatWindow = updatedWindows.first(where: { AXHelpers.identifier($0) != "Main Window" })
+            if chatWindow != nil { break }
+        }
         guard let chatWindow else {
             throw AutomationError.inputFieldNotFound
         }
 
-        // 8. Find the message input: AXTextArea inside a top-level AXScrollArea (no AXTable)
+        // 8. Find the message input field
         guard let inputField = findInputField(in: chatWindow) else {
-            print("DEBUG: Chat window UI tree:")
-            print(AXHelpers.dumpTree(chatWindow, maxDepth: 4))
             throw AutomationError.inputFieldNotFound
         }
 
-        // 9. Raise the chat window to make it the key window
+        // 9. Focus and type the message
         _ = AXHelpers.performAction(chatWindow, kAXRaiseAction as String)
         Thread.sleep(forTimeInterval: 0.3)
-
-        // 10. Click the input field to ensure it's focused
         AXHelpers.clickElement(inputField)
         Thread.sleep(forTimeInterval: 0.3)
 
-        // 11. Use AXValue to set text directly, then press Enter
-        //     This is more reliable than CGEvent keystrokes which go to the frontmost window
         if AXHelpers.setValue(inputField, message) {
             Thread.sleep(forTimeInterval: 0.2)
             AXHelpers.pressKey(keyCode: 36) // Return key
         } else {
-            // Fallback: type using CGEvent
             _ = AXHelpers.focus(inputField)
             Thread.sleep(forTimeInterval: 0.1)
             AXHelpers.typeText(message)
@@ -111,7 +111,7 @@ public final class KakaoAutomator {
             AXHelpers.pressKey(keyCode: 36) // Return key
         }
 
-        // 12. Close the chat window so it doesn't linger
+        // 10. Close the chat window
         Thread.sleep(forTimeInterval: 0.3)
         _ = AXHelpers.closeWindow(chatWindow)
     }

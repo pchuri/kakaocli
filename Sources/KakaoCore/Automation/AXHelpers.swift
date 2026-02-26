@@ -226,6 +226,49 @@ public enum AXHelpers {
         return nil
     }
 
+    /// Scroll a table row into the visible area of its parent scroll area.
+    /// Returns true if the row is now visible (or was already visible).
+    public static func scrollRowToVisible(_ row: AXUIElement, in scrollArea: AXUIElement) -> Bool {
+        guard let rowPos = position(row), let rowSize = size(row),
+              let areaPos = position(scrollArea), let areaSize = size(scrollArea) else {
+            return false
+        }
+
+        let areaTop = areaPos.y
+        let areaBottom = areaPos.y + areaSize.height
+        let rowTop = rowPos.y
+        let rowBottom = rowPos.y + rowSize.height
+
+        // Already visible
+        if rowTop >= areaTop && rowBottom <= areaBottom {
+            return true
+        }
+
+        // Scroll using CGEvent wheel events on the scroll area center
+        let scrollCenter = CGPoint(x: areaPos.x + areaSize.width / 2,
+                                    y: areaPos.y + areaSize.height / 2)
+        let maxAttempts = 80
+        for _ in 0..<maxAttempts {
+            let curPos = position(row)
+            guard let curY = curPos?.y, let curH = size(row)?.height else { break }
+
+            if curY >= areaTop && (curY + curH) <= areaBottom {
+                return true // Row is now visible
+            }
+
+            // Scroll down if row is below visible area, up if above
+            let deltaY: Int32 = curY > areaBottom ? -3 : 3
+            scrollLines(deltaY: deltaY, at: scrollCenter)
+            usleep(50000) // 50ms between scrolls
+        }
+
+        // Check one more time
+        if let finalPos = position(row), let finalSize = size(row) {
+            return finalPos.y >= areaTop && (finalPos.y + finalSize.height) <= areaBottom
+        }
+        return false
+    }
+
     /// Get the AXTable (chat list) from the main window.
     public static func chatListTable(_ window: AXUIElement) -> AXUIElement? {
         // Structure: AXWindow > AXScrollArea > AXTable
@@ -239,6 +282,30 @@ public enum AXHelpers {
             }
         }
         return nil
+    }
+
+    /// Get the AXScrollArea containing the chat list table from the main window.
+    public static func chatListScrollArea(_ window: AXUIElement) -> AXUIElement? {
+        for child in children(window) {
+            if role(child) == "AXScrollArea" {
+                for subchild in children(child) {
+                    if role(subchild) == "AXTable" {
+                        return child
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Select a row in a table via AX API.
+    public static func selectRow(_ row: AXUIElement, in table: AXUIElement) -> Bool {
+        let result = AXUIElementSetAttributeValue(
+            table,
+            kAXSelectedRowsAttribute as CFString,
+            [row] as CFTypeRef
+        )
+        return result == .success
     }
 
     /// Get the parent of an AXUIElement.
@@ -291,13 +358,25 @@ public enum AXHelpers {
         }
     }
 
-    /// Send a scroll wheel event. Negative deltaY = scroll up, positive = scroll down.
+    /// Send a scroll wheel event (pixel units). Negative deltaY = scroll up, positive = scroll down.
     public static func scroll(deltaY: Int32, at point: CGPoint? = nil) {
         if let point {
             moveMouse(to: point)
             usleep(50000) // 50ms settle
         }
         if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                               wheelCount: 1, wheel1: deltaY, wheel2: 0, wheel3: 0) {
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Send a scroll wheel event (line units). Negative deltaY = scroll down, positive = scroll up.
+    public static func scrollLines(deltaY: Int32, at point: CGPoint? = nil) {
+        if let point {
+            moveMouse(to: point)
+            usleep(50000) // 50ms settle
+        }
+        if let event = CGEvent(scrollWheelEvent2Source: nil, units: .line,
                                wheelCount: 1, wheel1: deltaY, wheel2: 0, wheel3: 0) {
             event.post(tap: .cghidEventTap)
         }

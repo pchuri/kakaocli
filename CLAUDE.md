@@ -33,6 +33,8 @@ No external dependencies besides `sqlcipher` (Homebrew). The `CSQLCipher` system
 - **Non-standard AX hierarchy**: `kAXWindowsAttribute` returns `AXApplication` elements instead of `AXWindow` when the window is hidden
 - **Status bar menu**: Most reliable way to check login state — "Log out" = logged in
 - **Window may not appear**: After clicking "Open KakaoTalk" in status bar, the AXWindow may take several seconds to materialize or may not appear at all
+- **Opening chats**: Use AX row selection (`kAXSelectedRowsAttribute`) + Enter key, NOT `doubleClickElement`. CGEvent double-click fails when the row is scrolled off-screen (AX reports coordinates outside the visible area). AX selection works regardless of scroll position.
+- **Paywall popup**: 500x500 blank window at (0,482), invisible to AX, visible to CGWindow API. Dismiss with Escape — but be careful, Escape can also close the main window.
 
 ### Credential Storage
 - Uses `security` CLI tool, NOT Security.framework (avoids code-signing ACL issues with `swift run`)
@@ -54,7 +56,6 @@ No external dependencies besides `sqlcipher` (Homebrew). The `CSQLCipher` system
 - **Clicking**: Use **CGEvent** directly, NOT `peekaboo click --app` (which activates the app and can reset scroll position)
 - **Scrolling**: `cliclick m:X,Y` (move cursor, no click) then `peekaboo scroll --direction up --amount 100 --no-auto-focus`
 - **Activation order**: `activateAndRaise()` BEFORE scrolling — never activate right before clicking
-- **Paywall popup**: Invisible to AX (`kAXWindowsAttribute`), visible to CGWindow API (`peekaboo window list`). Dismiss with Escape.
 - **MetadataStore**: `~/.kakaocli/metadata.json` maps chatId → displayName, memberCount, chatType, messageCount
 - **Harvest name mapping is position-based** (UI row[i] → DB row[i]) — unreliable because UI order shifts when messages arrive. Use DB-based name resolution instead.
 
@@ -70,6 +71,13 @@ No external dependencies besides `sqlcipher` (Homebrew). The `CSQLCipher` system
 ### Query Command
 - `kakaocli query "SELECT ..."` — runs raw read-only SQL against the decrypted DB, returns JSON array of arrays.
 - Useful for ad-hoc data extraction (e.g., member lists, message stats, schema exploration).
+
+### Debugging UI Automation
+- **Use `peekaboo` for screenshots**: `peekaboo image --window-id <ID> --no-remote --path /tmp/debug.png`
+- **Use `peekaboo --no-remote`**: The `--no-remote` flag is required (remote bridge often errors)
+- **List windows**: `peekaboo window list --app "KakaoTalk" --no-remote -j`
+- **Use `kakaocli inspect`** for AX tree dumps, not recompiling with debug prints
+- **Prefer peekaboo + inspect over adding debug code to Swift** — avoids rebuild cycles
 
 ## Safety Rules
 
