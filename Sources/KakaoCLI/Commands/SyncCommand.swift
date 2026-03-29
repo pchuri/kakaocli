@@ -95,15 +95,42 @@ func resolveDatabasePath(dbPath: String?, key: String?) throws -> (path: String,
         return (dbPath, key)
     }
     let uuid = try DeviceInfo.platformUUID()
-    let uid = try DeviceInfo.userId()
-    let dbName = KeyDerivation.databaseName(userId: uid, uuid: uuid)
-    let candidates = [
-        "\(DeviceInfo.containerPath)/\(dbName)",
-        "\(DeviceInfo.containerPath)/\(dbName).db",
-    ]
-    guard let found = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+
+    // Try standard path: derive userId → derive dbName → find file
+    if let uid = try? DeviceInfo.userId() {
+        let dbName = KeyDerivation.databaseName(userId: uid, uuid: uuid)
+        let candidates = [
+            "\(DeviceInfo.containerPath)/\(dbName)",
+            "\(DeviceInfo.containerPath)/\(dbName).db",
+        ]
+        if let found = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) {
+            let secureKey = key ?? KeyDerivation.secureKey(userId: uid, uuid: uuid)
+            return (found, secureKey)
+        }
+    }
+
+    // Fallback: scan for DB file, try candidate userIds for the key
+    guard let discoveredPath = DeviceInfo.discoverDatabaseFile() else {
+        let uid = try DeviceInfo.userId()
+        let dbName = KeyDerivation.databaseName(userId: uid, uuid: uuid)
         throw KakaoError.databaseNotFound("\(DeviceInfo.containerPath)/\(dbName)")
     }
-    let secureKey = key ?? KeyDerivation.secureKey(userId: uid, uuid: uuid)
-    return (found, secureKey)
+
+    if let key {
+        return (discoveredPath, key)
+    }
+
+    // Try candidate userIds to find a working key
+    let candidateIds = DeviceInfo.candidateUserIds()
+    for uid in candidateIds {
+        let candidateKey = KeyDerivation.secureKey(userId: uid, uuid: uuid)
+        let reader = DatabaseReader(databasePath: discoveredPath)
+        if reader.tryOpen(key: candidateKey) {
+            reader.close()
+            return (discoveredPath, candidateKey)
+        }
+    }
+
+    // Return the discovered path without a key — caller will get a decryption error
+    return (discoveredPath, nil)
 }
