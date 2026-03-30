@@ -15,36 +15,62 @@ public final class DatabaseReader: @unchecked Sendable {
     }
 
     /// Open the database. If a key is provided, attempts PRAGMA key (requires SQLCipher).
+    /// Tries cipher compatibility modes 3 and 4 (for newer KakaoTalk versions).
     public func open(key: String? = nil) throws {
         guard FileManager.default.fileExists(atPath: databasePath) else {
             throw KakaoError.databaseNotFound(databasePath)
         }
 
-        let result = sqlite3_open_v2(
-            databasePath,
-            &db,
-            SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
-            nil
-        )
-        guard result == SQLITE_OK else {
-            let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
-            throw KakaoError.databaseOpenFailed(msg)
-        }
-
         if let key {
-            // SQLCipher compatibility mode 3 (matches KakaoTalk's encryption)
-            try exec("PRAGMA cipher_default_compatibility = 3")
-            try exec("PRAGMA KEY='\(key)'")
+            // Try compatibility mode 3 first (legacy), then 4 (newer versions)
+            let compatModes = [3, 4]
+            for compat in compatModes {
+                // Close previous attempt if any
+                if db != nil { sqlite3_close(db); db = nil }
 
-            // Verify the key works by reading a table
-            do {
-                try exec("SELECT count(*) FROM sqlite_master")
-            } catch {
-                throw KakaoError.databaseOpenFailed(
-                    "PRAGMA key failed — database is encrypted and SQLCipher may not be linked. " +
-                    "Install via: brew install sqlcipher"
+                let result = sqlite3_open_v2(
+                    databasePath, &db,
+                    SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil
                 )
+                guard result == SQLITE_OK else {
+                    let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+                    throw KakaoError.databaseOpenFailed(msg)
+                }
+
+                do {
+                    try exec("PRAGMA cipher_default_compatibility = \(compat)")
+                    try exec("PRAGMA KEY='\(key)'")
+                    try exec("SELECT count(*) FROM sqlite_master")
+                    return // success
+                } catch {
+                    continue
+                }
             }
+            throw KakaoError.databaseOpenFailed(
+                "PRAGMA key failed with all cipher compatibility modes — " +
+                "database is encrypted and key may be wrong, or SQLCipher may not be linked. " +
+                "Install via: brew install sqlcipher"
+            )
+        } else {
+            let result = sqlite3_open_v2(
+                databasePath, &db,
+                SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil
+            )
+            guard result == SQLITE_OK else {
+                let msg = db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+                throw KakaoError.databaseOpenFailed(msg)
+            }
+        }
+    }
+
+    /// Try opening the database with a key. Returns true if the key is valid.
+    public func tryOpen(key: String) -> Bool {
+        do {
+            try open(key: key)
+            return true
+        } catch {
+            close()
+            return false
         }
     }
 
