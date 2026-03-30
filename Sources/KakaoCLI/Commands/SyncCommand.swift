@@ -121,7 +121,8 @@ func resolveDatabasePath(dbPath: String?, key: String?) throws -> (path: String,
     }
 
     // Try candidate userIds to find a working key
-    let candidateIds = DeviceInfo.candidateUserIds()
+    var candidateIds = (try? DeviceInfo.userId()).map { [$0] } ?? [Int]()
+    candidateIds += DeviceInfo.candidateUserIds().filter { !candidateIds.contains($0) }
     for uid in candidateIds {
         let candidateKey = KeyDerivation.secureKey(userId: uid, uuid: uuid)
         let reader = DatabaseReader(databasePath: discoveredPath)
