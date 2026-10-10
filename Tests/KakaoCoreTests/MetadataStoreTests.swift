@@ -75,3 +75,37 @@ func metadataPreservesOriginalBytesAfterDecodeFailure(json: String) throws {
     #expect(FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory))
     #expect(isDirectory.boolValue)
 }
+
+@Test func metadataSavePropagatesDirectoryCreationFailure() throws {
+    let url = temporaryMetadataURL()
+    let parent = url.deletingLastPathComponent()
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let store = MetadataStore(fileURL: url)
+    #expect(store.loadError == nil)
+    store.update(chatId: 42, name: "Alice")
+    let original = Data("not a directory".utf8)
+    try original.write(to: parent)
+    #expect(throws: (any Error).self) { try store.save() }
+    #expect(try Data(contentsOf: parent) == original)
+}
+
+@Test func harvestRejectsBrokenMetadataBeforeDatabaseOrUIWork() throws {
+    let url = temporaryMetadataURL()
+    defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    let metadata = MetadataStore(fileURL: url)
+    let expected = try #require(metadata.loadError) as NSError
+    // The database is deliberately unopened: the metadata error must come first.
+    let reader = DatabaseReader(databasePath: url.path + ".unused-db")
+    var progressCalled = false
+    do {
+        _ = try ChatHarvester.harvest(db: reader, metadata: metadata, options: .init(),
+                                     progress: { _ in progressCalled = true })
+        Issue.record("Harvest should reject unreadable metadata")
+    } catch {
+        let actual = error as NSError
+        #expect(actual.domain == expected.domain)
+        #expect(actual.code == expected.code)
+    }
+    #expect(!progressCalled)
+}

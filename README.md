@@ -151,7 +151,9 @@ kakaocli send --me _ "message"         # Send to self-chat (나와의 채팅)
 kakaocli send --dry-run "name" "msg"   # Preview without sending
 ```
 
-Sending requires an exact, unique chat name. Partial names and duplicate names are rejected.
+Sending requires an exact, unique chat name. Partial names, duplicate names, and unreadable
+chat names are rejected. Opening a chat requires verified AX row selection and table focus;
+coordinate-based opening and global typing fallbacks are disabled.
 The newly opened window must have the same exact title, and the message input and focus
 must remain verifiable. If KakaoTalk does not expose this information, sending stops
 without submitting the message. `--dry-run` prints a plan; it does not validate the live UI.
@@ -327,6 +329,8 @@ kakaocli는 카카오톡의 로컬 SQLCipher 암호화 데이터베이스를 **�
 ## Development tests
 
 On macOS 14+ with Swift 6 and `sqlcipher` installed, run `swift test`.
+Unreadable or invalid metadata blocks harvest before UI automation and cannot be overwritten.
+
 The send regression tests use a fake UI backend: they do not launch KakaoTalk,
 read credentials, or send messages. Metadata tests use temporary directories.
 

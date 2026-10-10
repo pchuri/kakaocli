@@ -22,6 +22,7 @@ private final class FakeSendUI: SendUI {
     var openedRows: [String] = []
     var writes: [String] = []
     var returnCount = 0
+    var beforeSubmit: (() -> Void)?
     var afterSet: (() -> Void)?
     var afterWriteWait: (() -> Void)?
 
@@ -50,7 +51,16 @@ private final class FakeSendUI: SendUI {
         return setSucceeds
     }
     func messageValue(in input: String) -> String? { storedMessage }
-    func pressReturn() throws { returnCount += 1 }
+    func submitMessage(_ message: String, in input: String, window: String, main: String, title: String) throws {
+        beforeSubmit?()
+        guard currentWindows.count == 2,
+              currentWindows.contains(where: { $0.element == main && $0.identifier == "Main Window" }),
+              currentWindows.contains(where: { $0.element == window && $0.title == title }),
+              messageValue(in: input) == message, isFocused(input, in: window) else {
+            throw AutomationError.sendFailed("Target changed at submission")
+        }
+        returnCount += 1
+    }
 }
 
 @Test func sendRequiresAnExactName() {
@@ -226,5 +236,35 @@ func sendRevalidatesImmediatelyBeforeReturn(change: String) {
         try SendWorkflow(ui: ui).send(to: "Alice", message: "hello", selfChat: false)
     }
     #expect(ui.writes.isEmpty)
+    #expect(ui.returnCount == 0)
+}
+
+@Test(arguments: [nil, ""] as [String?])
+func sendRejectsUnreadableNamesEvenWithOneExactMatch(name: String?) {
+    let ui = FakeSendUI()
+    ui.rows.append(SendChatRow(element: "unknown-row", name: name, isSelfChat: false))
+    #expect(throws: AutomationError.self) {
+        try SendWorkflow(ui: ui).send(to: "Alice", message: "hello", selfChat: false)
+    }
+    #expect(ui.openedRows.isEmpty)
+    #expect(ui.writes.isEmpty)
+    #expect(ui.returnCount == 0)
+}
+
+@Test(arguments: ["focus", "value", "title", "main"])
+func sendChecksTargetAtSubmissionBoundary(change: String) {
+    let ui = FakeSendUI()
+    ui.beforeSubmit = { [unowned ui] in
+        switch change {
+        case "focus": ui.focused = false
+        case "title": ui.currentWindows = [FakeSendUI.window("main"), FakeSendUI.window("alice-window", title: "Bob")]
+        case "main": ui.currentWindows = [FakeSendUI.window("replacement-main"), FakeSendUI.window("alice-window", title: "Alice")]
+        default: ui.storedMessage = "changed"
+        }
+    }
+    #expect(throws: AutomationError.self) {
+        try SendWorkflow(ui: ui).send(to: "Alice", message: "hello", selfChat: false)
+    }
+    #expect(ui.writes.count == 1)
     #expect(ui.returnCount == 0)
 }

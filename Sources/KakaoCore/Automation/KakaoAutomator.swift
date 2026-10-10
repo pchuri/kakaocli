@@ -49,13 +49,14 @@ private final class KakaoSendUI: SendUI {
         return AXHelpers.children(table).filter { AXHelpers.role($0) == "AXRow" }.map { row in
             let labels = AXHelpers.children(row).filter { AXHelpers.role($0) == "AXCell" }
                 .flatMap { AXHelpers.children($0) }
-            let names = labels.filter {
+            let nameLabels = labels.filter {
                 AXHelpers.role($0) == "AXStaticText" && AXHelpers.identifier($0) == "_NS:18"
-            }.compactMap { AXHelpers.value($0) }
+            }
             let isSelf = labels.contains {
                 AXHelpers.role($0) == "AXImage" && (AXHelpers.description($0) ?? "").contains("badge me")
             }
-            return SendChatRow(element: row, name: names.count == 1 ? names.first : nil, isSelfChat: isSelf)
+            return SendChatRow(element: row, name: nameLabels.count == 1 ? AXHelpers.value(nameLabels[0]) : nil,
+                               isSelfChat: isSelf)
         }
     }
 
@@ -68,23 +69,25 @@ private final class KakaoSendUI: SendUI {
         guard isFocusedWindow(mainWindow) else {
             throw AutomationError.sendFailed("The chat list window is not focused")
         }
-        if AXHelpers.selectRow(row, in: table) {
-            wait(0.2)
+        guard AXHelpers.selectRow(row, in: table), AXHelpers.focus(table) else {
+            throw AutomationError.sendFailed("Could not select and focus the chat list")
+        }
+        wait(0.2)
+        var value: AnyObject?
+        guard AXUIElementCopyAttributeValue(table, kAXSelectedRowsAttribute as CFString, &value) == .success,
+              let selected = value as? [AXUIElement], selected.count == 1,
+              let selectedRow = selected.first, sameElement(selectedRow, row),
+              isFocused(table, in: mainWindow) else {
+            throw AutomationError.sendFailed("Could not verify the selected chat row and table focus")
+        }
+        // Coordinate-based fallback cannot guarantee which app receives a click.
+        try pressReturn(validating: {
             var value: AnyObject?
             guard AXUIElementCopyAttributeValue(table, kAXSelectedRowsAttribute as CFString, &value) == .success,
                   let selected = value as? [AXUIElement], selected.count == 1,
-                  let selectedRow = selected.first, sameElement(selectedRow, row),
-                  isFocusedWindow(mainWindow) else {
-                throw AutomationError.sendFailed("Could not verify the selected chat row")
-            }
-            try pressReturn()
-        } else {
-            guard let scrollArea = AXHelpers.chatListScrollArea(mainWindow),
-                  AXHelpers.scrollRowToVisible(row, in: scrollArea), isFocusedWindow(mainWindow) else {
-                throw AutomationError.sendFailed("Could not safely open the selected chat")
-            }
-            AXHelpers.doubleClickElement(row)
-        }
+                  let selectedRow = selected.first, self.sameElement(selectedRow, row) else { return false }
+            return self.isFocused(table, in: mainWindow)
+        })
     }
 
     func inputField(in window: AXUIElement) -> AXUIElement? {
@@ -131,7 +134,24 @@ private final class KakaoSendUI: SendUI {
     func setMessage(_ message: String, in input: AXUIElement) -> Bool { AXHelpers.setValue(input, message) }
     func messageValue(in input: AXUIElement) -> String? { AXHelpers.value(input) }
 
-    func pressReturn() throws {
+    func submitMessage(_ message: String, in input: AXUIElement, window: AXUIElement,
+                       main: AXUIElement, title: String) throws {
+        try pressReturn(validating: {
+            let windows = self.windows()
+            let mains = windows.filter { $0.identifier == "Main Window" }
+            let chats = windows.filter { !self.sameElement($0.element, main) }
+            guard windows.count == 2, windows.allSatisfy({ $0.isWindow }),
+                  mains.count == 1, let currentMain = mains.first,
+                  self.sameElement(currentMain.element, main),
+                  chats.count == 1, let chat = chats.first,
+                  self.sameElement(chat.element, window), chat.title == title,
+                  let currentInput = self.inputField(in: window), self.sameElement(currentInput, input),
+                  self.messageValue(in: input) == message else { return false }
+            return self.isFocused(input, in: window)
+        })
+    }
+
+    private func pressReturn(validating targetIsValid: () -> Bool) throws {
         guard let app else { throw AutomationError.noWindows }
         var pid: pid_t = 0
         guard AXUIElementGetPid(app, &pid) == .success,
@@ -139,6 +159,9 @@ private final class KakaoSendUI: SendUI {
               let down = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false) else {
             throw AutomationError.sendFailed("Could not send a key to KakaoTalk")
+        }
+        guard targetIsValid() else {
+            throw AutomationError.sendFailed("The target or focus changed before Return")
         }
         down.postToPid(pid)
         up.postToPid(pid)

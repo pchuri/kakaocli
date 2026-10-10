@@ -29,7 +29,7 @@ protocol SendUI {
     func isFocused(_ input: Element, in window: Element) -> Bool
     func setMessage(_ message: String, in input: Element) -> Bool
     func messageValue(in input: Element) -> String?
-    func pressReturn() throws
+    func submitMessage(_ message: String, in input: Element, window: Element, main: Element, title: String) throws
     func wait(_ interval: TimeInterval)
 }
 
@@ -64,7 +64,11 @@ struct SendWorkflow<UI: SendUI> {
             throw AutomationError.sendFailed("An existing window is still open")
         }
 
-        let matches = try ui.chatRows(in: main.element).filter {
+        let rows = try ui.chatRows(in: main.element)
+        guard rows.allSatisfy({ $0.name.map { !$0.isEmpty } ?? false }) else {
+            throw AutomationError.sendFailed("Could not verify all chat names for unique targeting")
+        }
+        let matches = rows.filter {
             selfChat ? $0.isSelfChat : $0.name == chatName
         }
         let targetDescription = selfChat ? "self-chat (나와의 채팅)" : chatName
@@ -103,7 +107,7 @@ struct SendWorkflow<UI: SendUI> {
         guard ui.messageValue(in: input) == message else {
             throw AutomationError.sendFailed("The message input changed before send")
         }
-        try ui.pressReturn()
+        try ui.submitMessage(message, in: input, window: target.element, main: main.element, title: expectedTitle)
         ui.wait(0.3)
         _ = ui.closeWindow(target.element)
     }
